@@ -76,14 +76,15 @@ docker run --rm -p 3000:3000 --name tp3-api tp3-cloud-native-api
 
 Luego, verificar los endpoints desde el navegador o una herramienta de pruebas HTTP.
 
-> Estas instrucciones deberán verificarse cuando se realicen las pruebas de Docker.
+La construcción de la imagen Docker y la ejecución del contenedor fueron verificadas correctamente. Los endpoints / y /health respondieron como se esperaba.
 
 ## 8. Estado del desarrollo
 
-El proyecto se encuentra en etapa de desarrollo. La API y su Dockerfile están preparados inicialmente; la ejecución y las pruebas quedan pendientes de validación.
+La API desarrollada con Node.js y Express fue ejecutada y probada correctamente tanto en el entorno local como dentro de un contenedor Docker.
 
-La configuración final de la arquitectura se documentará a medida que se integren y verifiquen los componentes del grupo.
+Se verificaron los endpoints `/` y `/health`, y se comprobó la construcción de la imagen y el inicio del contenedor.
 
+El proyecto continúa en desarrollo. Queda pendiente la integración de NGINX como balanceador de carga, la configuración de la infraestructura mediante Docker Compose y la realización de pruebas de estrés con su correspondiente análisis crítico.
 ## 9. Repositorio
 
 [tp3-cloud-native-v2 en GitHub](https://github.com/milinievas/tp3-cloud-native-v2)
