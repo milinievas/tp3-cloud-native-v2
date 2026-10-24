@@ -1,0 +1,13 @@
+
+{
+  "name": "tp3-cloud-native-api",
+  "version": "1.0.0",
+  "description": "API del TP3 de Arquitectura de Sistemas",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
