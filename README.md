@@ -55,9 +55,10 @@ tp3-cloud-native-v2/
 
 ## 5. Requisitos
 
-Solo se necesita **Docker** con **Docker Compose v2** (incluido en Docker Desktop). No hace falta instalar Node.js ni NGINX.
+- **Docker** con **Docker Compose v2** (incluido en Docker Desktop). No hace falta instalar Node.js ni NGINX.
+- El puerto `80` del host debe estar libre. Si está ocupado, ver la sección 11 (Solución de problemas).
 
-El puerto `80` del host debe estar libre. Si está ocupado, ver la sección 11 (Solución de problemas).
+> Se requiere Compose v2: el antiguo `docker-compose` v1 ignora `deploy.replicas` y levantaría una sola réplica.
 
 ## 6. Ejecución del entorno
 
@@ -67,7 +68,7 @@ Desde la raíz del repositorio:
 docker compose up -d --build
 ```
 
-> `docker compose up -d` (o `docker-compose up -d` en Docker Desktop) también funciona: construye la imagen automáticamente si no existe. Se usa `--build` para garantizar que se tome la última versión del código. Se requiere Compose v2: el antiguo `docker-compose` v1 ignora `deploy.replicas` y levantaría una sola réplica.
+> Se usa `--build` para garantizar que se tome la última versión del código. Sin ese flag, el comando también funciona: construye la imagen automáticamente si no existe.
 
 Verificar el estado:
 
@@ -170,28 +171,16 @@ Se implementan dos niveles de health check:
 
 ## 10. Pruebas de carga (Apache Benchmark)
 
-Las pruebas se ejecutan **siempre contra el balanceador**, nunca contra una réplica directa. Se recomienda cerrar aplicaciones pesadas durante las pruebas para que la máquina que genera el tráfico no sea el cuello de botella.
+Las pruebas se ejecutan siempre contra el balanceador, apuntando al endpoint `/health`. Se recomienda cerrar aplicaciones pesadas durante las pruebas para que la máquina que genera el tráfico no sea el cuello de botella.
 
-### Opción A: sin instalar nada (recomendada)
+Se definen dos escenarios:
 
-Se ejecuta `ab` desde la imagen oficial `httpd`, conectada a la red interna del proyecto (`tp3-backend`) y apuntando al servicio `nginx`:
+| Escenario | Peticiones (`-n`) | Concurrencia (`-c`) | Objetivo |
+|---|---|---|---|
+| **A: moderado** | 5000 | 100 | Comportamiento normal bajo carga |
+| **B: extremo** | 15000 | 1000 | Saturación de CPU de las réplicas |
 
-```bash
-# Escenario 1 - Concurrencia moderada (100 usuarios concurrentes)
-docker run --rm --network tp3-backend httpd:2.4-alpine ab -n 5000 -c 100 http://nginx/
-
-# Escenario 2 - Concurrencia extrema (saturación)
-docker run --rm --network tp3-backend httpd:2.4-alpine ab -r -n 20000 -c 1000 http://nginx/
-```
-
-### Opción B: con `ab` instalado en el host
-
-```bash
-ab -n 5000 -c 100 http://localhost/
-ab -r -n 20000 -c 1000 http://localhost/
-```
-
-En Windows, `ab.exe` viene incluido en la distribución de Apache de [Apache Lounge](https://www.apachelounge.com/download/) (carpeta `bin`). En Linux, en el paquete `apache2-utils`.
+### Parámetros de `ab`
 
 | Parámetro | Significado |
 |---|---|
@@ -199,14 +188,44 @@ En Windows, `ab.exe` viene incluido en la distribución de Apache de [Apache Lou
 | `-c` | Peticiones concurrentes (usuarios simultáneos) |
 | `-r` | No abortar ante errores de socket. **Obligatorio en el escenario extremo**: sin él, `ab` se detiene en el primer `Connection reset by peer` y no genera reporte |
 
-> La URL debe terminar en `/` (`http://localhost/`); de lo contrario `ab` la rechaza.
+> Si la URL no tiene ruta, debe terminar en `/` (por ejemplo `http://nginx/`); de lo contrario `ab` la rechaza. Con `/health` no hay problema.
 
-> En Windows, `ab.exe` con miles de peticiones puede agotar los puertos locales del sistema (error `10048`) y fallar por causas ajenas a la arquitectura. Por eso se recomienda la opción A.
+### Opción A: con Docker, sin instalar nada (recomendada)
+
+Se ejecuta `ab` desde la imagen oficial `httpd`, conectada a la red interna del proyecto (`tp3-backend`) y apuntando al servicio `nginx`. Esto evita agotar los puertos locales de Windows (error `10048`) y funciona igual en cualquier sistema operativo.
+
+```bash
+# Escenario A - Concurrencia moderada (100 usuarios concurrentes)
+docker run --rm --network tp3-backend httpd:2.4-alpine ab -r -n 5000 -c 100 http://nginx/health
+
+# Escenario B - Concurrencia extrema (saturación de CPU - 1000 usuarios)
+docker run --rm --network tp3-backend httpd:2.4-alpine ab -r -n 15000 -c 1000 http://nginx/health
+```
+
+### Opción B: con `ab` instalado en el equipo
+
+Alternativa si se prefiere medir desde el host.
+
+- **Windows con XAMPP:** `ab.exe` está en `C:\xampp\apache\bin\`.
+- **Windows sin XAMPP:** `ab.exe` viene incluido en la distribución de Apache de [Apache Lounge](https://www.apachelounge.com/download/) (carpeta `bin`).
+- **Linux:** paquete `apache2-utils`.
+
+Ejemplo en Windows (PowerShell o CMD):
+
+```powershell
+# Escenario A - Concurrencia moderada (100 usuarios concurrentes)
+C:\xampp\apache\bin\ab.exe -r -n 5000 -c 100 http://localhost/health
+
+# Escenario B - Concurrencia extrema (saturación de CPU - 1000 usuarios)
+C:\xampp\apache\bin\ab.exe -r -n 15000 -c 1000 http://localhost/health
+```
+
+> **Nota sobre el escenario extremo en Windows:** se utilizan 1000 usuarios concurrentes en lugar de valores mayores para evitar el error `apr_socket_recv: Se ha forzado la interrupción de una conexión` (agotamiento de sockets de Windows) y permitir que el reporte se genere correctamente. Con miles de peticiones, `ab.exe` también puede agotar los puertos locales (error `10048`) y fallar por causas ajenas a la arquitectura; por eso se recomienda la Opción A.
 
 ### Guardar los resultados
 
 ```bash
-docker run --rm --network tp3-backend httpd:2.4-alpine ab -n 5000 -c 100 http://nginx/ > resultados_c100.txt
+docker run --rm --network tp3-backend httpd:2.4-alpine ab -r -n 5000 -c 100 http://nginx/health > resultados_c100.txt
 ```
 
 Del reporte de `ab` se extraen: **Requests per second**, **Time per request** (latencia promedio), **Failed requests**, **Non-2xx responses** y la tabla *Percentage of the requests served within a certain time*, de donde salen los percentiles **p95** y **p99**.
@@ -264,6 +283,7 @@ docker compose restart nginx
 | NGINX no arranca | Verificar que las réplicas estén `healthy` con `docker compose ps` y revisar `docker compose logs api` |
 | Solo responden una o dos réplicas | Ejecutar `docker compose restart nginx` (ver nota de la sección 10) |
 | Los cambios en el código de la API no se reflejan | Reconstruir con `docker compose up -d --build` |
+| `ab` termina sin reporte con `Connection reset by peer` | Agregar el flag `-r` al comando |
 
 ## 12. Detener el entorno
 
