@@ -67,6 +67,8 @@ Desde la raíz del repositorio:
 docker compose up -d --build
 ```
 
+> `docker compose up -d` (o `docker-compose up -d` en Docker Desktop) también funciona: construye la imagen automáticamente si no existe. Se usa `--build` para garantizar que se tome la última versión del código. Se requiere Compose v2: el antiguo `docker-compose` v1 ignora `deploy.replicas` y levantaría una sola réplica.
+
 Verificar el estado:
 
 ```bash
@@ -179,14 +181,14 @@ Se ejecuta `ab` desde la imagen oficial `httpd`, conectada a la red interna del 
 docker run --rm --network tp3-backend httpd:2.4-alpine ab -n 5000 -c 100 http://nginx/
 
 # Escenario 2 - Concurrencia extrema (saturación)
-docker run --rm --network tp3-backend httpd:2.4-alpine ab -n 20000 -c 1000 http://nginx/
+docker run --rm --network tp3-backend httpd:2.4-alpine ab -r -n 20000 -c 1000 http://nginx/
 ```
 
 ### Opción B: con `ab` instalado en el host
 
 ```bash
 ab -n 5000 -c 100 http://localhost/
-ab -n 20000 -c 1000 http://localhost/
+ab -r -n 20000 -c 1000 http://localhost/
 ```
 
 En Windows, `ab.exe` viene incluido en la distribución de Apache de [Apache Lounge](https://www.apachelounge.com/download/) (carpeta `bin`). En Linux, en el paquete `apache2-utils`.
@@ -195,8 +197,11 @@ En Windows, `ab.exe` viene incluido en la distribución de Apache de [Apache Lou
 |---|---|
 | `-n` | Número total de peticiones |
 | `-c` | Peticiones concurrentes (usuarios simultáneos) |
+| `-r` | No abortar ante errores de socket. **Obligatorio en el escenario extremo**: sin él, `ab` se detiene en el primer `Connection reset by peer` y no genera reporte |
 
 > La URL debe terminar en `/` (`http://localhost/`); de lo contrario `ab` la rechaza.
+
+> En Windows, `ab.exe` con miles de peticiones puede agotar los puertos locales del sistema (error `10048`) y fallar por causas ajenas a la arquitectura. Por eso se recomienda la opción A.
 
 ### Guardar los resultados
 
@@ -219,16 +224,21 @@ Permite ver si las réplicas llegan a su límite de CPU (50 % de un núcleo cada
 Para identificar si fue NGINX quien empezó a rechazar conexiones:
 
 ```bash
-docker compose logs nginx | grep -iE "worker_connections|upstream timed out|no live upstreams"
+docker compose logs nginx | grep -iE "worker_connections|upstream timed out|temporarily disabled|no live upstreams"
 ```
 
-En PowerShell, reemplazar `grep -iE "..."` por `Select-String -Pattern "worker_connections|upstream timed out|no live upstreams"`.
+En PowerShell, reemplazar `grep -iE "..."` por `Select-String -Pattern "worker_connections|upstream timed out|temporarily disabled|no live upstreams"`.
 
 | Mensaje en el log | Interpretación |
 |---|---|
 | `worker_connections are not enough` | NGINX agotó su pool de conexiones (cuello de botella en el balanceador) |
 | `upstream timed out` / respuestas `504` | Las réplicas no respondieron en 5 s (cuello de botella en la CPU de las réplicas) |
+| `upstream server temporarily disabled` | Una réplica superó `max_fails` y NGINX la sacó de rotación por 10 s |
 | `no live upstreams` | Todas las réplicas quedaron fuera de rotación temporalmente |
+
+> **`Failed requests: 0` no implica que no hubo fallos.** Con `proxy_next_upstream`, NGINX reintenta en otra réplica las peticiones que fallaron, por lo que el cliente recibe `200` pero con mayor latencia. Por eso hay que contrastar el reporte de `ab` con los logs de NGINX.
+
+> **Capacidad del balanceador:** con `worker_processes auto`, NGINX crea un worker por núcleo de la máquina, y cada uno admite 1024 conexiones (cada petición usa 2). La capacidad máxima del balanceador depende entonces del equipo donde se ejecute la prueba, y debe informarse junto con los resultados.
 
 ### Comparación: 1 réplica vs. 3 réplicas
 
@@ -266,6 +276,7 @@ docker compose down
 - **Nombre de servicio en lugar de `localhost`**: dentro del contenedor de NGINX, `localhost` es el propio NGINX; las réplicas se alcanzan por el nombre `api` mediante el DNS interno de Docker.
 - **Réplicas sin puertos publicados**: tres contenedores no pueden ocupar el mismo puerto del host y, además, así el balanceador es el único punto de entrada.
 - **Round-robin**: las réplicas son idénticas y las peticiones homogéneas, por lo que un reparto equitativo es adecuado.
+- **Zona de memoria compartida (`zone`)**: NGINX usa varios workers; sin una zona compartida, cada uno lleva su propio turno de round-robin y su propio conteo de fallos, y el reparto deja de ser ordenado.
 - **Keepalive hacia las réplicas**: NGINX reutiliza conexiones TCP en lugar de abrir una por petición, reduciendo la latencia.
 - **Límite de CPU por réplica (`0.50`)**: hace posible alcanzar la saturación en el escenario extremo y permite comparar de forma justa 1 réplica contra 3.
 - **Health check con `127.0.0.1`**: en imágenes Alpine, `localhost` puede resolver a IPv6 (`::1`) mientras la API escucha en IPv4.
