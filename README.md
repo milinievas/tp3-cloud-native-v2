@@ -257,7 +257,7 @@ En PowerShell, reemplazar `grep -iE "..."` por `Select-String -Pattern "worker_c
 
 > **`Failed requests: 0` no implica que no hubo fallos.** Con `proxy_next_upstream`, NGINX reintenta en otra réplica las peticiones que fallaron, por lo que el cliente recibe `200` pero con mayor latencia. Por eso hay que contrastar el reporte de `ab` con los logs de NGINX.
 
-> **Capacidad del balanceador:** con `worker_processes auto`, NGINX crea un worker por núcleo de la máquina, y cada uno admite 1024 conexiones (cada petición usa 2). La capacidad máxima del balanceador depende entonces del equipo donde se ejecute la prueba, y debe informarse junto con los resultados.
+> **Capacidad del balanceador:** con `worker_processes auto`, NGINX crea un worker por núcleo de la máquina, y cada uno admite 4096 conexiones (`worker_connections`; cada petición usa 2). Se eligió ese valor para que el balanceador soporte el escenario extremo de 1000 usuarios (2000 conexiones) aun con un solo worker. La capacidad máxima del balanceador depende entonces del equipo donde se ejecute la prueba, y debe informarse junto con los resultados.
 
 ### Comparación: 1 réplica vs. 3 réplicas
 
